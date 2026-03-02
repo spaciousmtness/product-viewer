@@ -1,0 +1,19 @@
+# API keys and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Node
+node_modules/
+dist/
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
