@@ -288,55 +288,8 @@ export default function App() {
           })
           .catch(() => {})
 
-        // Web image research: collect reference images for better 3D generation
-        setStage('researching')
-        let webAngleMap: Record<string, string> | null = null
-        try {
-          const research = await api.researchImages(recog.productName, recog.brand ?? undefined)
-          if (research.angle_map && Object.keys(research.angle_map).length > 1) {
-            webAngleMap = research.angle_map
-            // Merge user's original image as front if we have it and web didn't find a better front
-            if (fileIds[0] && !webAngleMap['front']) {
-              webAngleMap['front'] = fileIds[0]
-            }
-          }
-        } catch {
-          // Web research failed — proceed with what we have
-          console.log('Web image research failed, using original images')
-        }
-
-        // 3D generation — choose best available method
-        setStage('generating')
-        const prompt = buildGenerationPrompt(recog)
-
-        let taskId: string
-        if (webAngleMap && Object.keys(webAngleMap).length > 1) {
-          // Best: multiview from web-collected images
-          const result = await api.generateMultiview(webAngleMap, prompt)
-          taskId = result.taskId
-        } else if (uploadMode === 'multi' && angleImages.length > 1) {
-          // User provided multiple angles manually
-          const fileIdMap: Record<string, string> = {}
-          for (const img of angleImages) {
-            if (img.fileId) fileIdMap[img.angle] = img.fileId
-          }
-          const result = await api.generateMultiview(fileIdMap, prompt)
-          taskId = result.taskId
-        } else if (fileIds[0]) {
-          // Single user image
-          const result = await api.generate(fileIds[0], prompt)
-          taskId = result.taskId
-        } else {
-          // Text-only (research mode, no images at all)
-          const result = await api.generateFromText(prompt)
-          taskId = result.taskId
-        }
-
-        const url = await pollGeneration(taskId)
-        setModelUrl(url)
-
-        setStage('loading')
-        await viewerRef.current?.loadModel(url)
+        // Skip 3D generation (Tripo removed) — go straight to viewing
+        // The intelligence pipeline auto-fires when stage becomes 'viewing'
         setStage('viewing')
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Something went wrong'
