@@ -1,6 +1,11 @@
-import type { RecognitionResult, GenerationStatus, UploadResult, CandidateResponse } from './types'
+import type {
+  RecognitionResult, GenerationStatus, UploadResult, CandidateResponse,
+  IntelligenceResult, ComponentResult, PatentResult, TeardownResult, TeardownDetail,
+  MaterialResult, FCCResult, BarcodeResult, SpecPackageRequest, Annotation, AnnotationData,
+} from './types'
 
 const BASE = '/api/v1'
+const BASE_V2 = '/api/v2'
 
 class BackendError extends Error {
   constructor(message: string) {
@@ -162,4 +167,134 @@ export const api = {
         brand: brand,
       }),
     }),
+}
+
+// ── V2 Intelligence Pipeline API ──
+
+async function requestV2<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(`${BASE_V2}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...init,
+    })
+  } catch {
+    throw new BackendError('Backend v2 not running.')
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.detail || `Request failed: ${res.status}`)
+  }
+  return res.json()
+}
+
+export const api2 = {
+  /** Run full intelligence pipeline — all sources in parallel. */
+  runIntelligence: (
+    productName: string,
+    brand?: string,
+    modelNumber?: string,
+    upc?: string,
+    materials?: string[],
+  ): Promise<IntelligenceResult> =>
+    requestV2('/intelligence', {
+      method: 'POST',
+      body: JSON.stringify({
+        product_name: productName,
+        brand,
+        model_number: modelNumber,
+        upc,
+        materials,
+      }),
+    }),
+
+  /** Search electronic components via Octopart. */
+  searchComponents: (query: string, limit?: number): Promise<ComponentResult> =>
+    requestV2('/components/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, limit }),
+    }),
+
+  /** Search USPTO patents. */
+  searchPatents: (query: string, limit?: number): Promise<PatentResult> =>
+    requestV2('/patents/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, limit }),
+    }),
+
+  /** Search iFixit teardowns. */
+  searchTeardowns: (query: string, limit?: number): Promise<TeardownResult> =>
+    requestV2('/teardowns/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, limit }),
+    }),
+
+  /** Get detailed teardown steps. */
+  getTeardownDetail: (guideId: number): Promise<TeardownDetail> =>
+    requestV2(`/teardowns/${guideId}`),
+
+  /** Lookup material properties. */
+  lookupMaterial: (materialName: string): Promise<MaterialResult> =>
+    requestV2('/materials/lookup', {
+      method: 'POST',
+      body: JSON.stringify({ material_name: materialName }),
+    }),
+
+  /** Search FCC filings. */
+  searchFCC: (query: string, limit?: number): Promise<FCCResult> =>
+    requestV2('/fcc/search', {
+      method: 'POST',
+      body: JSON.stringify({ query, limit }),
+    }),
+
+  /** Lookup barcode/UPC. */
+  lookupBarcode: (upc: string): Promise<{ upc: string; product: Record<string, unknown> | null }> =>
+    requestV2('/barcode/lookup', {
+      method: 'POST',
+      body: JSON.stringify({ upc }),
+    }),
+
+  /** Generate spec package PDF — returns blob. */
+  generateSpecPackage: async (data: SpecPackageRequest): Promise<Blob> => {
+    let res: Response
+    try {
+      res = await fetch(`${BASE_V2}/spec-package/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      })
+    } catch {
+      throw new BackendError('Backend v2 not running.')
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || `Spec package generation failed: ${res.status}`)
+    }
+    return res.blob()
+  },
+
+  /** Create an annotation on a product. */
+  createAnnotation: (slug: string, data: AnnotationData): Promise<Annotation> =>
+    requestV2(`/annotations/${slug}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  /** Get all annotations for a product. */
+  getAnnotations: (slug: string): Promise<{ annotations: Annotation[]; count: number }> =>
+    requestV2(`/annotations/${slug}`),
+
+  /** Update an annotation. */
+  updateAnnotation: (slug: string, annotationId: string, data: Partial<AnnotationData>): Promise<Annotation> =>
+    requestV2(`/annotations/${slug}/${annotationId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  /** Delete an annotation. */
+  deleteAnnotation: async (slug: string, annotationId: string): Promise<void> => {
+    await requestV2<Record<string, unknown>>(`/annotations/${slug}/${annotationId}`, {
+      method: 'DELETE',
+    })
+  },
 }
