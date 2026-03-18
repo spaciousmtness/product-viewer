@@ -11,6 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import config
 from app.routes import upload, recognize, generate, status, catalog, specs, research, candidates, web_research
+from app.routes import (
+    components, patents, teardowns,
+    materials as materials_routes,
+    fcc, barcode, spec_package, annotations, intelligence,
+)
 
 
 @asynccontextmanager
@@ -44,6 +49,17 @@ app.include_router(specs.router, prefix="/api/v1", tags=["specs"])
 app.include_router(research.router, prefix="/api/v1", tags=["research"])
 app.include_router(candidates.router, prefix="/api/v1", tags=["candidates"])
 app.include_router(web_research.router, prefix="/api/v1", tags=["web_research"])
+
+# ── v2 Intelligence Pipeline routes ─────────────────────────────────
+app.include_router(components.router, prefix="/api/v2", tags=["components"])
+app.include_router(patents.router, prefix="/api/v2", tags=["patents"])
+app.include_router(teardowns.router, prefix="/api/v2", tags=["teardowns"])
+app.include_router(materials_routes.router, prefix="/api/v2", tags=["materials"])
+app.include_router(fcc.router, prefix="/api/v2", tags=["fcc"])
+app.include_router(barcode.router, prefix="/api/v2", tags=["barcode"])
+app.include_router(spec_package.router, prefix="/api/v2", tags=["spec_package"])
+app.include_router(annotations.router, prefix="/api/v2", tags=["annotations"])
+app.include_router(intelligence.router, prefix="/api/v2", tags=["intelligence"])
 
 
 @app.get("/health")
