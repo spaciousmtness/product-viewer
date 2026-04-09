@@ -8,10 +8,13 @@ import { PipelineStatus } from './components/pipeline/PipelineStatus'
 import { CandidateSelector } from './components/pipeline/CandidateSelector'
 import { ViewerControls } from './components/controls/ViewerControls'
 import { ExportPanel } from './components/controls/ExportPanel'
+import { IntelligencePanel } from './components/intelligence/IntelligencePanel'
+import { SpecGenerator } from './components/intelligence/SpecGenerator'
+import { AnnotationLayer } from './components/intelligence/AnnotationLayer'
 import { exportRender, downloadBlob } from './components/viewer/export-renderer'
 import { exportSTL, exportGLB, downloadModelUrl } from './components/viewer/model-export'
-import { api } from './lib/api'
-import type { PipelineStage, RecognitionResult, BackgroundMode, AngleImage, Candidate } from './lib/types'
+import { api, api2 } from './lib/api'
+import type { PipelineStage, RecognitionResult, BackgroundMode, AngleImage, Candidate, IntelligenceResult } from './lib/types'
 
 // Demo GLB for testing the viewer without the backend
 const DEMO_MODEL = 'https://modelviewer.dev/shared-assets/models/Astronaut.glb'
@@ -103,6 +106,14 @@ export default function App() {
 
   // Candidate selection state
   const [candidates, setCandidates] = useState<Candidate[] | null>(null)
+
+  // V2 Intelligence state
+  const [intelligence, setIntelligence] = useState<IntelligenceResult | null>(null)
+  const [intelligenceLoading, setIntelligenceLoading] = useState(false)
+  const [intelligenceError, setIntelligenceError] = useState<string>()
+  const [showIntelPanel, setShowIntelPanel] = useState(false)
+  const [annotationMode, setAnnotationMode] = useState(false)
+  const [intelPanelHeight, setIntelPanelHeight] = useState(320)
 
   // --- Single-image pipeline ---
   const runSinglePipeline = useCallback(
@@ -277,55 +288,8 @@ export default function App() {
           })
           .catch(() => {})
 
-        // Web image research: collect reference images for better 3D generation
-        setStage('researching')
-        let webAngleMap: Record<string, string> | null = null
-        try {
-          const research = await api.researchImages(recog.productName, recog.brand ?? undefined)
-          if (research.angle_map && Object.keys(research.angle_map).length > 1) {
-            webAngleMap = research.angle_map
-            // Merge user's original image as front if we have it and web didn't find a better front
-            if (fileIds[0] && !webAngleMap['front']) {
-              webAngleMap['front'] = fileIds[0]
-            }
-          }
-        } catch {
-          // Web research failed — proceed with what we have
-          console.log('Web image research failed, using original images')
-        }
-
-        // 3D generation — choose best available method
-        setStage('generating')
-        const prompt = buildGenerationPrompt(recog)
-
-        let taskId: string
-        if (webAngleMap && Object.keys(webAngleMap).length > 1) {
-          // Best: multiview from web-collected images
-          const result = await api.generateMultiview(webAngleMap, prompt)
-          taskId = result.taskId
-        } else if (uploadMode === 'multi' && angleImages.length > 1) {
-          // User provided multiple angles manually
-          const fileIdMap: Record<string, string> = {}
-          for (const img of angleImages) {
-            if (img.fileId) fileIdMap[img.angle] = img.fileId
-          }
-          const result = await api.generateMultiview(fileIdMap, prompt)
-          taskId = result.taskId
-        } else if (fileIds[0]) {
-          // Single user image
-          const result = await api.generate(fileIds[0], prompt)
-          taskId = result.taskId
-        } else {
-          // Text-only (research mode, no images at all)
-          const result = await api.generateFromText(prompt)
-          taskId = result.taskId
-        }
-
-        const url = await pollGeneration(taskId)
-        setModelUrl(url)
-
-        setStage('loading')
-        await viewerRef.current?.loadModel(url)
+        // Skip 3D generation (Tripo removed) — go straight to viewing
+        // The intelligence pipeline auto-fires when stage becomes 'viewing'
         setStage('viewing')
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Something went wrong'
@@ -359,6 +323,13 @@ export default function App() {
     setAngleImages([])
     setUploadMode('single')
     setCandidates(null)
+    // Reset v2 state
+    setIntelligence(null)
+    setIntelligenceLoading(false)
+    setIntelligenceError(undefined)
+    setShowIntelPanel(false)
+    setAnnotationMode(false)
+    intelligenceRanRef.current = false
   }, [])
 
   // --- Save to catalog ---
@@ -482,6 +453,54 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [stage, background, handleBackgroundChange])
 
+  // Auto-fire intelligence pipeline when entering viewing stage
+  const intelligenceRanRef = useRef(false)
+  useEffect(() => {
+    if (stage === 'viewing' && recognition && !intelligence && !intelligenceLoading && !intelligenceRanRef.current) {
+      intelligenceRanRef.current = true
+      setIntelligenceLoading(true)
+      setIntelligenceError(undefined)
+      api2.runIntelligence(
+        recognition.productName,
+        recognition.brand ?? undefined,
+        recognition.modelNumber ?? undefined,
+        undefined,
+        recognition.materials ?? undefined,
+      )
+        .then((result) => {
+          setIntelligence(result)
+          setShowIntelPanel(true)
+        })
+        .catch((err) => {
+          setIntelligenceError(err instanceof Error ? err.message : 'Intelligence pipeline failed')
+        })
+        .finally(() => {
+          setIntelligenceLoading(false)
+        })
+    }
+  }, [stage, recognition, intelligence, intelligenceLoading])
+
+  // Panel resize via drag
+  const resizing = useRef(false)
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    resizing.current = true
+    const startY = e.clientY
+    const startH = intelPanelHeight
+    const onMove = (ev: MouseEvent) => {
+      if (!resizing.current) return
+      const delta = startY - ev.clientY
+      setIntelPanelHeight(Math.max(120, Math.min(600, startH + delta)))
+    }
+    const onUp = () => {
+      resizing.current = false
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [intelPanelHeight])
+
   const showViewer = stage === 'viewing' || stage === 'exporting'
 
   return (
@@ -495,7 +514,7 @@ export default function App() {
             <div className="w-1.5 h-[2px] bg-neutral-300 rounded-full" />
           </div>
           <h1 className="text-[13px] font-semibold text-neutral-900 tracking-tight">Product Viewer</h1>
-          <span className="text-[10px] text-neutral-300 font-mono">0.3</span>
+          <span className="text-[10px] text-neutral-300 font-mono">0.4</span>
         </div>
         {stage !== 'idle' && (
           <button
@@ -748,7 +767,22 @@ export default function App() {
                 />
               )}
 
-              {/* 5. Save to catalog */}
+              {/* 5. Spec generator — v2 */}
+              <SpecGenerator
+                intelligence={intelligence}
+                recognition={recognition}
+              />
+
+              {/* 6. Annotations — only when saved to catalog */}
+              {savedSlug && (
+                <AnnotationLayer
+                  slug={savedSlug}
+                  active={annotationMode}
+                  onToggle={() => setAnnotationMode(!annotationMode)}
+                />
+              )}
+
+              {/* 7. Save to catalog */}
               <div className="rounded-lg border border-neutral-200 p-3 space-y-2">
                 {savedSlug ? (
                   <div className="text-xs text-emerald-600">
@@ -785,7 +819,7 @@ export default function App() {
         </aside>
 
         {/* Viewer area */}
-        <main className="flex-1 relative bg-neutral-100 shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]">
+        <main className="flex-1 relative bg-neutral-100 shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" data-viewer-area>
           <ProductViewer
             ref={viewerRef}
             onLoad={() => {}}
@@ -915,6 +949,63 @@ export default function App() {
               onResetCamera={() => viewerRef.current?.resetCamera()}
               onCameraPreset={(p) => viewerRef.current?.setCameraPreset(p)}
             />
+          )}
+
+          {/* Intelligence panel toggle + annotation toggle — top-right of viewer */}
+          {showViewer && recognition && (
+            <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+              <button
+                onClick={() => setShowIntelPanel(!showIntelPanel)}
+                className={`text-xs px-3 py-1.5 rounded-lg border backdrop-blur-sm transition-all duration-150 ${
+                  showIntelPanel
+                    ? 'bg-neutral-900 text-white border-neutral-900'
+                    : 'bg-white/90 text-neutral-600 border-neutral-200 hover:border-neutral-400'
+                }`}
+              >
+                {showIntelPanel ? 'Hide Intel' : 'Intelligence'}
+                {intelligenceLoading && (
+                  <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                )}
+                {intelligence && !intelligenceLoading && (
+                  <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                )}
+              </button>
+              {savedSlug && (
+                <button
+                  onClick={() => setAnnotationMode(!annotationMode)}
+                  className={`text-xs px-3 py-1.5 rounded-lg border backdrop-blur-sm transition-all duration-150 ${
+                    annotationMode
+                      ? 'bg-purple-600 text-white border-purple-600'
+                      : 'bg-white/90 text-neutral-600 border-neutral-200 hover:border-neutral-400'
+                  }`}
+                >
+                  Annotate
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Intelligence panel — bottom dock */}
+          {showViewer && showIntelPanel && (
+            <div
+              className="absolute bottom-0 left-0 right-0 z-10 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]"
+              style={{ height: intelPanelHeight }}
+            >
+              {/* Resize handle */}
+              <div
+                onMouseDown={handleResizeStart}
+                className="absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize bg-neutral-100 hover:bg-neutral-200 transition-colors z-20 flex items-center justify-center"
+              >
+                <div className="w-8 h-0.5 bg-neutral-300 rounded-full" />
+              </div>
+              <div className="h-full pt-1.5">
+                <IntelligencePanel
+                  data={intelligence}
+                  loading={intelligenceLoading}
+                  error={intelligenceError}
+                />
+              </div>
+            </div>
           )}
         </main>
       </div>

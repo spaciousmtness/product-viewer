@@ -9,6 +9,7 @@ export type PipelineStage =
   | 'loading'
   | 'viewing'
   | 'exporting'
+  | 'intelligence'
 
 export interface Candidate {
   productName: string
@@ -85,4 +86,161 @@ export const EXPORT_PRESETS: Record<string, { width: number; height: number; lab
   '8K': { width: 7680, height: 4320, label: '8K' },
   'square-4K': { width: 4096, height: 4096, label: 'Square 4K' },
   'instagram': { width: 1080, height: 1080, label: 'Instagram' },
+}
+
+// ── V2 Intelligence Pipeline Types ──
+
+export interface IntelligenceResult {
+  query: { product_name: string; brand: string | null; model_number: string | null; upc: string | null }
+  specs: { bestbuy: Record<string, unknown> | null; icecat: Record<string, unknown> | null; wikipedia: Record<string, unknown> | null }
+  components: ComponentEntry[] | null
+  patents: PatentEntry[] | null
+  teardowns: TeardownEntry[] | null
+  fcc: FCCEntry[] | null
+  barcode: Record<string, unknown> | null
+  materials: MaterialEntry[]
+  meta: {
+    elapsed_ms: number
+    sources_with_data: string[]
+    sources_empty: string[]
+    errors: { source: string; error: string }[]
+    total_sources: number
+  }
+}
+
+export interface ComponentEntry {
+  mpn: string
+  manufacturer: string
+  description: string
+  specs: Record<string, string>
+  pricing: { currency: string; price: number; quantity: number }[]
+  datasheet_url: string | null
+  octopart_url: string | null
+}
+
+export interface PatentEntry {
+  patent_number: string
+  title: string
+  abstract: string
+  inventors: string[]
+  assignee: string
+  filing_date: string
+  patent_type: string
+  thumbnail_url: string | null
+}
+
+export interface TeardownEntry {
+  guide_id: number
+  title: string
+  device_name: string
+  difficulty: string
+  steps_count: number
+  tools_required: string[]
+  url: string
+  image_url: string | null
+}
+
+export interface TeardownDetail {
+  guide_id: number
+  title: string
+  steps: TeardownStep[]
+  tools_required: string[]
+  difficulty: string
+  url: string
+}
+
+export interface TeardownStep {
+  step_number: number
+  title: string
+  text: string
+  image_url: string | null
+  tools: string[]
+}
+
+export interface FCCEntry {
+  fcc_id: string
+  applicant: string
+  product_description: string
+  grant_date: string
+  detail_url: string
+}
+
+export interface MaterialEntry {
+  name: string
+  material_type: string
+  grade: string | null
+  density: string | null
+  tensile_strength: string | null
+  thermal_properties: Record<string, string> | null
+  common_applications: string[]
+}
+
+export interface ComponentResult {
+  query: string
+  components: ComponentEntry[]
+  count: number
+}
+
+export interface PatentResult {
+  query: string
+  patents: PatentEntry[]
+  count: number
+}
+
+export interface TeardownResult {
+  query: string
+  teardowns: TeardownEntry[]
+  count: number
+}
+
+export interface MaterialResult {
+  material: MaterialEntry | null
+}
+
+export interface FCCResult {
+  query: string
+  results: FCCEntry[]
+  count: number
+}
+
+export interface BarcodeResult {
+  upc: string
+  product: Record<string, unknown> | null
+}
+
+export interface SpecPackageRequest {
+  product_name: string
+  brand?: string
+  recognition?: Record<string, unknown>
+  intelligence?: Record<string, unknown>
+  sections: {
+    dimensions: boolean
+    materials: boolean
+    components: boolean
+    regulatory: boolean
+    patents: boolean
+    teardowns: boolean
+    specs: boolean
+  }
+}
+
+export interface Annotation {
+  id: string
+  slug: string
+  type: 'note' | 'measurement' | 'flag' | 'spec_ref'
+  x: number
+  y: number
+  text: string
+  value: string
+  confidence: string
+  created_at: string
+}
+
+export interface AnnotationData {
+  type: 'note' | 'measurement' | 'flag' | 'spec_ref'
+  x: number
+  y: number
+  text: string
+  value?: string
+  confidence?: string
 }
